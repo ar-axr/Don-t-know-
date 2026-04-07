@@ -1,0 +1,87 @@
+name: Deploy & Run WhatsApp Bot
+
+on:
+  push:
+    branches: [ main, master ]
+  schedule:
+    - cron: '*/30 * * * *'  # Re-run every 30 minutes to keep alive
+  workflow_dispatch:
+
+jobs:
+  deploy-and-run:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Node.js environment
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Install dependencies
+      run: |
+        npm init -y
+        npm install @whiskeysockets/baileys@latest
+        npm install @hapi/boom pino node-telegram-bot-api fs
+        npm install -g pm2 forever
+    
+    - name: Create required directories
+      run: |
+        mkdir -p session_auth
+        mkdir -p commands
+    
+    - name: Verify commands folder
+      run: |
+        echo "🔍 Checking commands directory..."
+        if [ -d "commands" ]; then
+          COUNT=$(ls -1 commands/*.js 2>/dev/null | wc -l)
+          echo "✅ Found $COUNT command files"
+          ls -la commands/
+        else
+          echo "⚠️ Commands folder not found!"
+          mkdir -p commands
+        fi
+    
+    - name: Create package.json if missing
+      run: |
+        if [ ! -f "package.json" ]; then
+          cat > package.json << 'EOF'
+        {
+          "name": "whatsapp-bot",
+          "version": "1.0.0",
+          "main": "index.js",
+          "scripts": {
+            "start": "node index.js"
+          },
+          "dependencies": {
+            "@whiskeysockets/baileys": "^6.6.0",
+            "@hapi/boom": "^10.0.1",
+            "pino": "^8.17.2",
+            "node-telegram-bot-api": "^0.64.0"
+          }
+        }
+        EOF
+        fi
+    
+    - name: Run bot with auto-restart
+      run: |
+        # Use forever to keep bot running
+        npx forever start --uid "whatsapp-bot" --killSignal=SIGTERM index.js
+        sleep 5
+        npx forever list
+        
+        # Keep the job alive with logs
+        echo "🤖 Bot is running..."
+        echo "📱 Bot will continue running in background"
+        npx forever logs 0 --f --plain --lines 50
+    
+    - name: Keep workflow alive
+      run: |
+        # This keeps the GitHub Action running
+        while true; do
+          sleep 60
+          echo "🟢 Bot is still running - $(date)"
+          npx forever list
+        done
